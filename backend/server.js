@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
+const os = require('os');
 const multer = require('multer');
 const cors = require('cors');
 const { port, libraryRoot } = require('./config');
@@ -9,6 +10,9 @@ const { scanLibrary, getAlbums, getAlbumById, getTrackById } = require('./librar
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac']);
 const COVER_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
+const TEMP_UPLOAD_ROOT = path.join(os.tmpdir(), 'webaudio-uploads');
+
+fs.mkdirSync(TEMP_UPLOAD_ROOT, { recursive: true });
 
 let scanReady = scanLibrary();
 
@@ -21,15 +25,18 @@ const storage = multer.diskStorage({
       return cb(new Error('Album name is required'));
     }
 
-    const targetDir = path.join(libraryRoot, albumId);
-
-    if (req.params.id && !fs.existsSync(targetDir)) {
-      return cb(new Error('Album not found'));
+    if (req.params.id) {
+      const targetDir = path.join(libraryRoot, albumId);
+      if (!fs.existsSync(targetDir)) {
+        return cb(new Error('Album not found'));
+      }
+      req.albumUploadPath = targetDir;
+      return cb(null, targetDir);
     }
 
-    ensureAlbumFolder(targetDir);
-    req.albumUploadPath = targetDir;
-    return cb(null, targetDir);
+    const tempDir = fs.mkdtempSync(path.join(TEMP_UPLOAD_ROOT, `${albumId}-`));
+    req.albumUploadPath = tempDir;
+    return cb(null, tempDir);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -38,7 +45,9 @@ const storage = multer.diskStorage({
       file.fieldname === 'cover'
         ? 'cover'
         : sanitizeName(path.basename(file.originalname, ext)) || 'file';
-    const targetDir = req.albumUploadPath ||
+    const targetDir =
+      req.albumUploadPath ||
+      file.destination ||
       path.join(libraryRoot, req.params.id || sanitizeName(req.body && req.body.name) || 'uploads');
     let candidate = `${baseName}${normalizedExt}`;
     if (fs.existsSync(path.join(targetDir, candidate))) {
@@ -139,6 +148,20 @@ function cleanupUploadedFiles(files) {
       }
     }
   });
+}
+
+async function moveTrackFiles(trackFiles, albumPath) {
+  for (const file of trackFiles) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const baseName = sanitizeName(path.basename(file.originalname, ext)) || 'track';
+    let candidate = `${baseName}${ext}`;
+    let counter = 1;
+    while (fs.existsSync(path.join(albumPath, candidate))) {
+      candidate = `${baseName}-${Date.now()}-${counter}${ext}`;
+      counter += 1;
+    }
+    await fsp.rename(file.path, path.join(albumPath, candidate));
+  }
 }
 
 function normalizeCoverFile(albumPath, file) {
@@ -302,18 +325,22 @@ app.post(
       return res.status(409).json({ error: 'Album already exists' });
     }
 
+    const coverFile = req.files && req.files.cover ? req.files.cover[0] : null;
+    const trackFiles = (req.files && req.files.tracks) || [];
+
+    if (trackFiles.length === 0) {
+      cleanupUploadedFiles(req.files);
+      return res.status(400).json({ error: 'At least one track is required' });
+    }
+
     try {
-      ensureAlbumFolder(albumPath);
-      const coverFile = req.files && req.files.cover ? req.files.cover[0] : null;
+      await fsp.mkdir(albumPath, { recursive: true });
+
       if (coverFile) {
         normalizeCoverFile(albumPath, coverFile);
       }
 
-      const trackFiles = (req.files && req.files.tracks) || [];
-      if (trackFiles.length === 0) {
-        cleanupUploadedFiles(req.files);
-        return res.status(400).json({ error: 'At least one track is required' });
-      }
+      await moveTrackFiles(trackFiles, albumPath);
 
       writeMetadata(albumPath, name.trim(), description ? description.trim() : undefined);
 
@@ -324,6 +351,7 @@ app.post(
     } catch (error) {
       console.error('Failed to create album:', error);
       cleanupUploadedFiles(req.files);
+      await fsp.rm(albumPath, { recursive: true, force: true }).catch(() => {});
       return handleUploadError(res, error);
     }
   },
