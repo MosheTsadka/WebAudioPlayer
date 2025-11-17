@@ -449,7 +449,7 @@ app.get('/covers/:albumId/:fileName', async (req, res) => {
 const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
-  app.get('*', (req, res) => {
+  app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
 }
