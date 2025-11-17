@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiUrl } from '../apiClient'
 
 const UploadPage = () => {
   const [albums, setAlbums] = useState([])
@@ -14,7 +15,7 @@ const UploadPage = () => {
   const refreshAlbums = async () => {
     setLoadingAlbums(true)
     try {
-      const response = await fetch('/api/albums')
+      const response = await fetch(apiUrl('/api/albums'))
       if (!response.ok) {
         throw new Error('Failed to load albums')
       }
@@ -52,7 +53,7 @@ const UploadPage = () => {
     })
 
     try {
-      const response = await fetch('/api/albums', {
+      const response = await fetch(apiUrl('/api/albums'), {
         method: 'POST',
         body: formData,
       })
@@ -84,7 +85,7 @@ const UploadPage = () => {
     Array.from(appendTracks).forEach((track) => formData.append('tracks', track))
 
     try {
-      const response = await fetch(`/api/albums/${targetAlbum}/tracks`, {
+      const response = await fetch(apiUrl(`/api/albums/${targetAlbum}/tracks`), {
         method: 'POST',
         body: formData,
       })
