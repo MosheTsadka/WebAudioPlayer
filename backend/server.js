@@ -1,20 +1,72 @@
 const express = require('express');
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const multer = require('multer');
+const cors = require('cors');
 const { port, libraryRoot } = require('./config');
 const { scanLibrary, getAlbums, getAlbumById, getTrackById } = require('./libraryScanner');
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac']);
 const COVER_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
 
-scanLibrary();
+let scanReady = scanLibrary();
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const albumId = req.params.id || sanitizeName(req.body && req.body.name);
+    const targetDir = albumId ? path.join(libraryRoot, albumId) : libraryRoot;
+    ensureAlbumFolder(targetDir);
+    req.albumUploadPath = targetDir;
+    cb(null, targetDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const normalizedExt = file.fieldname === 'cover' && ext === '.jpeg' ? '.jpg' : ext;
+    const baseName =
+      file.fieldname === 'cover'
+        ? 'cover'
+        : sanitizeName(path.basename(file.originalname, ext)) || 'file';
+    const targetDir =
+      req.albumUploadPath ||
+      path.join(libraryRoot, req.params.id || sanitizeName(req.body && req.body.name) || 'uploads');
+    let candidate = `${baseName}${normalizedExt}`;
+    if (fs.existsSync(path.join(targetDir, candidate))) {
+      const timestamp = Date.now();
+      candidate = `${baseName}-${timestamp}${normalizedExt}`;
+      let counter = 1;
+      while (fs.existsSync(path.join(targetDir, candidate))) {
+        candidate = `${baseName}-${timestamp}-${counter}${normalizedExt}`;
+        counter += 1;
+      }
+    }
+    cb(null, candidate);
+  },
+});
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (file.fieldname === 'cover') {
+      if (!COVER_EXTENSIONS.has(ext)) {
+        return cb(new Error('Unsupported cover file type'));
+      }
+      return cb(null, true);
+    }
+
+    if (!AUDIO_EXTENSIONS.has(ext)) {
+      return cb(new Error(`Unsupported file type: ${ext}`));
+    }
+    return cb(null, true);
+  },
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 
 function buildCoverUrl(album) {
   if (!album.coverFileName) {
@@ -64,46 +116,37 @@ function ensureAlbumFolder(folderPath) {
   fs.mkdirSync(folderPath, { recursive: true });
 }
 
-function ensureUniqueFilePath(targetDir, baseName) {
-  const ext = path.extname(baseName);
-  const nameWithoutExt = path.basename(baseName, ext);
-  let candidate = `${nameWithoutExt}${ext}`;
-  let counter = 1;
-  while (fs.existsSync(path.join(targetDir, candidate))) {
-    candidate = `${nameWithoutExt}-${counter}${ext}`;
-    counter += 1;
-  }
-  return path.join(targetDir, candidate);
+function cleanupUploadedFiles(files) {
+  if (!files) return;
+  const list = Array.isArray(files) ? files : Object.values(files).flat();
+  list.forEach((file) => {
+    if (file && file.path && fs.existsSync(file.path)) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (err) {
+        console.warn('Failed to cleanup uploaded file:', err);
+      }
+    }
+  });
 }
 
-function writeUploadedFile(targetDir, file, allowedExtensions) {
-  if (!file || !file.originalname || !file.buffer) {
-    throw new Error('Invalid file upload');
-  }
-
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (!allowedExtensions.has(ext)) {
-    throw new Error(`Unsupported file type: ${ext}`);
-  }
-
-  ensureAlbumFolder(targetDir);
-  const sanitizedName = sanitizeName(path.basename(file.originalname, ext)) || 'file';
-  const fullPath = ensureUniqueFilePath(targetDir, `${sanitizedName}${ext}`);
-  fs.writeFileSync(fullPath, file.buffer);
-  return fullPath;
-}
-
-function writeCoverFile(albumPath, file) {
-  if (!file || !file.originalname || !file.buffer) {
+function normalizeCoverFile(albumPath, file) {
+  if (!file || !file.originalname || !file.path) {
     throw new Error('Invalid cover upload');
   }
   const ext = path.extname(file.originalname).toLowerCase();
   if (!COVER_EXTENSIONS.has(ext)) {
     throw new Error('Unsupported cover file type');
   }
+
   ensureAlbumFolder(albumPath);
   const targetPath = path.join(albumPath, `cover${ext === '.jpeg' ? '.jpg' : ext}`);
-  fs.writeFileSync(targetPath, file.buffer);
+  if (file.path !== targetPath) {
+    if (fs.existsSync(targetPath)) {
+      fs.unlinkSync(targetPath);
+    }
+    fs.renameSync(file.path, targetPath);
+  }
   return targetPath;
 }
 
@@ -139,21 +182,24 @@ function handleUploadError(res, error) {
   return res.status(500).json({ error: 'Upload failed' });
 }
 
-app.get('/api/albums', (req, res) => {
-  const albums = getAlbums().map((album) => formatAlbum(album, false));
+app.get('/api/albums', async (req, res) => {
+  await scanReady;
+  const albums = (await getAlbums()).map((album) => formatAlbum(album, false));
   res.json({ albums });
 });
 
-app.get('/api/albums/:id', (req, res) => {
-  const album = getAlbumById(req.params.id);
+app.get('/api/albums/:id', async (req, res) => {
+  await scanReady;
+  const album = await getAlbumById(req.params.id);
   if (!album) {
     return res.status(404).json({ error: 'Album not found' });
   }
   return res.json({ album: formatAlbum(album, true) });
 });
 
-app.get('/api/tracks/:trackId/stream', (req, res) => {
-  const track = getTrackById(req.params.trackId);
+app.get('/api/tracks/:trackId/stream', async (req, res) => {
+  await scanReady;
+  const track = await getTrackById(req.params.trackId);
   if (!track) {
     return res.status(404).json({ error: 'Track not found' });
   }
@@ -202,25 +248,46 @@ app.get('/api/tracks/:trackId/stream', (req, res) => {
   });
 });
 
+app.delete('/api/albums/:id', async (req, res) => {
+  await scanReady;
+  const album = await getAlbumById(req.params.id);
+  if (!album) {
+    return res.status(404).json({ error: 'Album not found' });
+  }
+
+  try {
+    await fsp.rm(album.folderPath, { recursive: true, force: true });
+    scanReady = scanLibrary();
+    await scanReady;
+    return res.json({ message: 'Album deleted' });
+  } catch (error) {
+    console.error('Failed to delete album:', error);
+    return res.status(500).json({ error: 'Failed to delete album' });
+  }
+});
+
 app.post(
   '/api/albums',
   upload.fields([
     { name: 'cover', maxCount: 1 },
     { name: 'tracks', maxCount: 50 },
   ]),
-  (req, res) => {
+  async (req, res) => {
     const { name, description } = req.body;
     if (!name || !name.trim()) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({ error: 'Album name is required' });
     }
 
     const folderName = sanitizeName(name);
     if (!folderName) {
+      cleanupUploadedFiles(req.files);
       return res.status(400).json({ error: 'Album name is invalid' });
     }
 
     const albumPath = path.join(libraryRoot, folderName);
     if (fs.existsSync(albumPath)) {
+      cleanupUploadedFiles(req.files);
       return res.status(409).json({ error: 'Album already exists' });
     }
 
@@ -228,56 +295,91 @@ app.post(
       ensureAlbumFolder(albumPath);
       const coverFile = req.files && req.files.cover ? req.files.cover[0] : null;
       if (coverFile) {
-        writeCoverFile(albumPath, coverFile);
+        normalizeCoverFile(albumPath, coverFile);
       }
 
       const trackFiles = (req.files && req.files.tracks) || [];
       if (trackFiles.length === 0) {
+        cleanupUploadedFiles(req.files);
         return res.status(400).json({ error: 'At least one track is required' });
       }
 
-      trackFiles.forEach((file) => writeUploadedFile(albumPath, file, AUDIO_EXTENSIONS));
       writeMetadata(albumPath, name.trim(), description ? description.trim() : undefined);
 
-      scanLibrary();
-      const album = getAlbumById(folderName);
+      scanReady = scanLibrary();
+      await scanReady;
+      const album = await getAlbumById(folderName);
       return res.status(201).json({ album: formatAlbum(album, true) });
     } catch (error) {
       console.error('Failed to create album:', error);
+      cleanupUploadedFiles(req.files);
       return handleUploadError(res, error);
     }
   },
 );
 
-app.post('/api/albums/:id/tracks', upload.array('tracks', 50), (req, res) => {
-  const album = getAlbumById(req.params.id);
+app.post('/api/albums/:id/tracks', upload.array('tracks', 50), async (req, res) => {
+  await scanReady;
+  const album = await getAlbumById(req.params.id);
   if (!album) {
+    cleanupUploadedFiles(req.files);
     return res.status(404).json({ error: 'Album not found' });
   }
 
   const trackFiles = req.files || [];
   if (trackFiles.length === 0) {
+    cleanupUploadedFiles(req.files);
     return res.status(400).json({ error: 'No tracks uploaded' });
   }
 
   try {
-    trackFiles.forEach((file) => writeUploadedFile(album.folderPath, file, AUDIO_EXTENSIONS));
-    scanLibrary();
-    const updatedAlbum = getAlbumById(req.params.id);
-    return res.json({ album: formatAlbum(updatedAlbum, true) });
+    scanReady = scanLibrary();
+    await scanReady;
+    const updatedAlbum = await getAlbumById(req.params.id);
+  return res.json({ album: formatAlbum(updatedAlbum, true) });
   } catch (error) {
     console.error('Failed to add tracks:', error);
+    cleanupUploadedFiles(req.files);
     return handleUploadError(res, error);
   }
 });
 
-app.post('/api/library/rescan', (req, res) => {
-  const albums = scanLibrary();
+app.delete('/api/albums/:albumId/tracks/:trackId', async (req, res) => {
+  await scanReady;
+  const { albumId, trackId } = req.params;
+  const track = await getTrackById(trackId);
+  if (!track || track.albumId !== albumId) {
+    return res.status(404).json({ error: 'Track not found' });
+  }
+
+  try {
+    await fsp.unlink(track.filePath).catch((err) => {
+      if (err.code !== 'ENOENT') {
+        throw err;
+      }
+    });
+    scanReady = scanLibrary();
+    await scanReady;
+    const updatedAlbum = await getAlbumById(albumId);
+    if (!updatedAlbum) {
+      return res.json({ message: 'Track deleted, album removed' });
+    }
+    return res.json({ album: formatAlbum(updatedAlbum, true) });
+  } catch (error) {
+    console.error('Failed to delete track:', error);
+    return res.status(500).json({ error: 'Failed to delete track' });
+  }
+});
+
+app.post('/api/library/rescan', async (req, res) => {
+  scanReady = scanLibrary();
+  const albums = await scanReady;
   res.json({ albums: albums.map((album) => formatAlbum(album, false)) });
 });
 
-app.get('/covers/:albumId/:fileName', (req, res) => {
-  const album = getAlbumById(req.params.albumId);
+app.get('/covers/:albumId/:fileName', async (req, res) => {
+  await scanReady;
+  const album = await getAlbumById(req.params.albumId);
   if (!album || album.coverFileName !== req.params.fileName) {
     return res.status(404).end();
   }
@@ -294,9 +396,12 @@ if (fs.existsSync(frontendDistPath)) {
 }
 
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`WebAudioPlayer server listening on port ${port}`);
-  });
+  (async () => {
+    await scanReady;
+    app.listen(port, () => {
+      console.log(`WebAudioPlayer server listening on port ${port}`);
+    });
+  })();
 }
 
 module.exports = app;

@@ -26,6 +26,7 @@ const parseHash = () => {
 function App() {
   const [route, setRoute] = useState(() => parseHash())
   const [currentTrack, setCurrentTrack] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -55,6 +56,7 @@ function App() {
     }
     setCurrentTrack({
       id: track.id,
+      albumId: track.albumId,
       title: track.title,
       albumTitle: album?.title,
       coverUrl: album?.coverUrl,
@@ -69,6 +71,25 @@ function App() {
     ],
     [],
   )
+
+  const handleAlbumDeleted = useCallback(
+    (albumId) => {
+      setRefreshKey((value) => value + 1)
+      setCurrentTrack((track) => (track && track.albumId === albumId ? null : track))
+      if (route.albumId === albumId) {
+        navigate('/')
+      }
+    },
+    [navigate, route.albumId],
+  )
+
+  const handleTrackDeleted = useCallback((albumId, trackId) => {
+    setRefreshKey((value) => value + 1)
+    setCurrentTrack((track) => (track && track.id === trackId ? null : track))
+    if (route.albumId === albumId && window.location.hash !== `#/albums/${albumId}`) {
+      navigate(`/albums/${albumId}`)
+    }
+  }, [navigate, route.albumId])
 
   return (
     <div className="app-shell">
@@ -93,11 +114,17 @@ function App() {
 
       <main className="app-content">
         {route.view === 'albums' ? (
-          <AlbumList onSelectAlbum={handleSelectAlbum} />
+          <AlbumList onSelectAlbum={handleSelectAlbum} onAlbumDeleted={handleAlbumDeleted} refreshKey={refreshKey} />
         ) : null}
 
         {route.view === 'albumDetail' ? (
-          <AlbumDetail albumId={route.albumId} onBack={() => navigate('/')} onPlayTrack={handlePlayTrack} />
+          <AlbumDetail
+            albumId={route.albumId}
+            onBack={() => navigate('/')}
+            onPlayTrack={handlePlayTrack}
+            onAlbumDeleted={handleAlbumDeleted}
+            onTrackDeleted={handleTrackDeleted}
+          />
         ) : null}
 
         {route.view === 'upload' ? <UploadPage /> : null}

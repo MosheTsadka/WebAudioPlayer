@@ -213,6 +213,11 @@
   color: #fff;
 }
 
+.danger {
+  background: #f97316;
+  color: #fff;
+}
+
 .secondary {
   background: #e2e8f0;
   color: #0f172a;
@@ -224,6 +229,33 @@
   color: #0ea5e9;
   cursor: pointer;
   font-weight: 600;
+}
+
+.link-button.danger {
+  color: #b91c1c;
+}
+
+.error-text {
+  color: #b91c1c;
+  margin-top: 0.5rem;
+}
+
+.album-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.album-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.track-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .upload-page {

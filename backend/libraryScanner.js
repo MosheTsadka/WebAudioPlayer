@@ -1,4 +1,5 @@
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const { libraryRoot } = require('./config');
 
@@ -8,23 +9,19 @@ const COVER_FILE_CANDIDATES = ['cover.jpg', 'cover.png'];
 let albumIndex = new Map();
 let trackIndex = new Map();
 
-function ensureLibraryRoot() {
-  if (!fs.existsSync(libraryRoot)) {
-    fs.mkdirSync(libraryRoot, { recursive: true });
-  }
+async function ensureLibraryRoot() {
+  await fsp.mkdir(libraryRoot, { recursive: true });
 }
 
-function readAlbumMetadata(metadataPath) {
-  if (!fs.existsSync(metadataPath)) {
-    return {};
-  }
-
+async function readAlbumMetadata(metadataPath) {
   try {
-    const contents = fs.readFileSync(metadataPath, 'utf8');
+    const contents = await fsp.readFile(metadataPath, 'utf8');
     const parsed = JSON.parse(contents);
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (error) {
-    console.warn(`Failed to parse metadata at ${metadataPath}:`, error.message);
+    if (error.code !== 'ENOENT') {
+      console.warn(`Failed to parse metadata at ${metadataPath}:`, error.message);
+    }
     return {};
   }
 }
@@ -110,25 +107,50 @@ function buildTracks(albumId, albumPath, orderedFiles) {
   });
 }
 
-function buildAlbumEntry(albumId, albumPath, dirEntries) {
-  const metadataPath = path.join(albumPath, 'album.json');
-  const metadata = readAlbumMetadata(metadataPath);
-  const coverFileName = findCoverFile(dirEntries);
-  const audioFiles = getAudioFiles(dirEntries);
-  const orderedTrackFiles = buildTrackOrder(audioFiles, metadata);
-  const tracks = buildTracks(albumId, albumPath, orderedTrackFiles);
+async function scanLibrary() {
+  await ensureLibraryRoot();
 
-  const albumTitle =
-    typeof metadata.title === 'string' && metadata.title.trim().length > 0
-      ? metadata.title.trim()
-      : albumId;
-  const albumDescription =
-    typeof metadata.description === 'string' && metadata.description.trim().length > 0
-      ? metadata.description.trim()
-      : null;
+  const newAlbumIndex = new Map();
+  const newTrackIndex = new Map();
 
-  return {
-    album: {
+  let dirEntries = [];
+  try {
+    dirEntries = await fsp.readdir(libraryRoot, { withFileTypes: true });
+  } catch (error) {
+    console.error('Failed to read library root:', error.message);
+    albumIndex = newAlbumIndex;
+    trackIndex = newTrackIndex;
+    return [];
+  }
+
+  for (const dirent of dirEntries.filter((entry) => entry.isDirectory())) {
+    const albumId = dirent.name;
+    const albumPath = path.join(libraryRoot, albumId);
+    let albumEntries = [];
+    try {
+      albumEntries = await fsp.readdir(albumPath, { withFileTypes: true });
+    } catch (error) {
+      console.warn(`Unable to read album folder ${albumPath}:`, error.message);
+      continue;
+    }
+
+    const metadataPath = path.join(albumPath, 'album.json');
+    const metadata = await readAlbumMetadata(metadataPath);
+    const coverFileName = findCoverFile(albumEntries);
+    const audioFiles = getAudioFiles(albumEntries);
+    const orderedTrackFiles = buildTrackOrder(audioFiles, metadata);
+    const tracks = buildTracks(albumId, albumPath, orderedTrackFiles);
+
+    const albumTitle =
+      typeof metadata.title === 'string' && metadata.title.trim().length > 0
+        ? metadata.title.trim()
+        : albumId;
+    const albumDescription =
+      typeof metadata.description === 'string' && metadata.description.trim().length > 0
+        ? metadata.description.trim()
+        : null;
+
+    const album = {
       id: albumId,
       title: albumTitle,
       description: albumDescription,
@@ -137,44 +159,11 @@ function buildAlbumEntry(albumId, albumPath, dirEntries) {
       coverFileName,
       tracks,
       trackCount: tracks.length,
-    },
-    tracks,
-  };
-}
+    };
 
-function scanLibrary() {
-  ensureLibraryRoot();
-
-  const newAlbumIndex = new Map();
-  const newTrackIndex = new Map();
-
-  let dirEntries = [];
-  try {
-    dirEntries = fs.readdirSync(libraryRoot, { withFileTypes: true });
-  } catch (error) {
-    console.error('Failed to read library root:', error.message);
-    albumIndex = newAlbumIndex;
-    trackIndex = newTrackIndex;
-    return [];
+    newAlbumIndex.set(album.id, album);
+    tracks.forEach((track) => newTrackIndex.set(track.id, track));
   }
-
-  dirEntries
-    .filter((dirent) => dirent.isDirectory())
-    .forEach((dirent) => {
-      const albumId = dirent.name;
-      const albumPath = path.join(libraryRoot, albumId);
-      let albumEntries = [];
-      try {
-        albumEntries = fs.readdirSync(albumPath, { withFileTypes: true });
-      } catch (error) {
-        console.warn(`Unable to read album folder ${albumPath}:`, error.message);
-        return;
-      }
-
-      const { album, tracks } = buildAlbumEntry(albumId, albumPath, albumEntries);
-      newAlbumIndex.set(album.id, album);
-      tracks.forEach((track) => newTrackIndex.set(track.id, track));
-    });
 
   albumIndex = newAlbumIndex;
   trackIndex = newTrackIndex;
@@ -182,15 +171,15 @@ function scanLibrary() {
   return getAlbums();
 }
 
-function getAlbums() {
+async function getAlbums() {
   return Array.from(albumIndex.values());
 }
 
-function getAlbumById(id) {
+async function getAlbumById(id) {
   return albumIndex.get(id) || null;
 }
 
-function getTrackById(trackId) {
+async function getTrackById(trackId) {
   return trackIndex.get(trackId) || null;
 }
 

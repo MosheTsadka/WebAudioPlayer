@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 
-const AlbumDetail = ({ albumId, onBack, onPlayTrack }) => {
+const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDeleted }) => {
   const [album, setAlbum] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     if (!albumId) {
@@ -15,6 +16,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack }) => {
     const fetchAlbum = async () => {
       setLoading(true)
       setError('')
+      setActionError('')
       try {
         const response = await fetch(`/api/albums/${albumId}`)
         if (!response.ok) {
@@ -44,6 +46,55 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack }) => {
       isMounted = false
     }
   }, [albumId])
+
+  const handleDeleteAlbum = async () => {
+    if (!album) return
+    const confirm = window.confirm('Delete this album and all its tracks?')
+    if (!confirm) return
+
+    try {
+      const response = await fetch(`/api/albums/${encodeURIComponent(album.id)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to delete album')
+      }
+      setAlbum(null)
+      onAlbumDeleted?.(album.id)
+      onBack?.()
+    } catch (err) {
+      setActionError(err.message || 'Unable to delete album')
+    }
+  }
+
+  const handleDeleteTrack = async (track) => {
+    if (!track) return
+    const confirm = window.confirm('Delete this track?')
+    if (!confirm) return
+    setActionError('')
+
+    try {
+      const response = await fetch(
+        `/api/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(track.id)}`,
+        { method: 'DELETE' },
+      )
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to delete track')
+      }
+      const payload = await response.json().catch(() => ({}))
+      if (payload.album) {
+        const tracks = [...(payload.album.tracks || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        setAlbum({ ...payload.album, tracks })
+      } else {
+        setAlbum(null)
+      }
+      onTrackDeleted?.(albumId, track.id)
+    } catch (err) {
+      setActionError(err.message || 'Unable to delete track')
+    }
+  }
 
   if (!albumId) {
     return (
@@ -102,6 +153,12 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack }) => {
           <h2>{album.title}</h2>
           {album.description ? <p className="muted">{album.description}</p> : null}
           <p className="muted">{album.trackCount} track{album.trackCount === 1 ? '' : 's'}</p>
+          <div className="album-actions">
+            <button type="button" className="danger" onClick={handleDeleteAlbum}>
+              Delete album
+            </button>
+          </div>
+          {actionError ? <p className="error-text">{actionError}</p> : null}
         </div>
       </div>
       <ol className="track-list">
@@ -111,13 +168,22 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack }) => {
               <p className="track-title">{track.title}</p>
               <p className="muted">Track {track.order}</p>
             </div>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => onPlayTrack?.(track, album)}
-            >
-              Play
-            </button>
+            <div className="track-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => onPlayTrack?.(track, album)}
+              >
+                Play
+              </button>
+              <button
+                type="button"
+                className="danger link-button"
+                onClick={() => handleDeleteTrack(track)}
+              >
+                Delete
+              </button>
+            </div>
           </li>
         ))}
       </ol>

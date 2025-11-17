@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const AlbumList = ({ onSelectAlbum }) => {
+const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
   const [albums, setAlbums] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -35,7 +35,26 @@ const AlbumList = ({ onSelectAlbum }) => {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [refreshKey])
+
+  const handleDeleteAlbum = async (albumId) => {
+    const confirm = window.confirm('Delete this album and all its tracks?')
+    if (!confirm) return
+
+    try {
+      const response = await fetch(`/api/albums/${encodeURIComponent(albumId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || 'Failed to delete album')
+      }
+      setAlbums((prev) => prev.filter((album) => album.id !== albumId))
+      onAlbumDeleted?.(albumId)
+    } catch (err) {
+      setError(err.message || 'Unable to delete album')
+    }
+  }
 
   if (loading) {
     return <div className="album-list">Loading albums…</div>
@@ -79,6 +98,18 @@ const AlbumList = ({ onSelectAlbum }) => {
             <div className="album-card-body">
               <h3>{album.title}</h3>
               <p>{album.trackCount} track{album.trackCount === 1 ? '' : 's'}</p>
+              <div className="album-card-actions">
+                <button
+                  type="button"
+                  className="danger link-button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteAlbum(album.id)
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </button>
         ))}
