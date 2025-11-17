@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiUrl } from '../apiClient'
 
 const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
   const [albums, setAlbums] = useState([])
@@ -12,7 +13,7 @@ const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
       setLoading(true)
       setError('')
       try {
-        const response = await fetch('/api/albums')
+        const response = await fetch(apiUrl('/api/albums'))
         if (!response.ok) {
           throw new Error('Failed to load albums')
         }
@@ -42,7 +43,7 @@ const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
     if (!confirm) return
 
     try {
-      const response = await fetch(`/api/albums/${encodeURIComponent(albumId)}`, {
+      const response = await fetch(apiUrl(`/api/albums/${encodeURIComponent(albumId)}`), {
         method: 'DELETE',
       })
       if (!response.ok) {

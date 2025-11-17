@@ -4,6 +4,25 @@ import AlbumDetail from './components/AlbumDetail.jsx'
 import PlayerBar from './components/PlayerBar.jsx'
 import UploadPage from './pages/UploadPage.jsx'
 import './App.css'
+import { apiUrl } from './apiClient'
+
+const parseHash = () => {
+  const hash = window.location.hash.replace(/^#/, '')
+  if (!hash || hash === '/') {
+    return { view: 'albums', albumId: null }
+  }
+
+  const segments = hash.split('/').filter(Boolean)
+  if (segments[0] === 'albums' && segments[1]) {
+    return { view: 'albumDetail', albumId: segments[1] }
+  }
+
+  if (segments[0] === 'upload') {
+    return { view: 'upload', albumId: null }
+  }
+
+  return { view: 'albums', albumId: null }
+}
 
 const parseHash = () => {
   const hash = window.location.hash.replace(/^#/, '')
@@ -60,7 +79,7 @@ function App() {
       title: track.title,
       albumTitle: album?.title,
       coverUrl: album?.coverUrl,
-      streamUrl: `/api/tracks/${track.id}/stream`,
+      streamUrl: apiUrl(`/api/tracks/${track.id}/stream`),
     })
   }, [])
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { apiUrl } from '../apiClient'
 
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
@@ -28,7 +29,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
       setError('')
       setActionError('')
       try {
-        const response = await fetch(`/api/albums/${albumId}`)
+        const response = await fetch(apiUrl(`/api/albums/${albumId}`))
         if (!response.ok) {
           throw new Error('Unable to load album details')
         }
@@ -72,7 +73,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
     if (!confirm) return
 
     try {
-      const response = await fetch(`/api/albums/${encodeURIComponent(album.id)}`, {
+      const response = await fetch(apiUrl(`/api/albums/${encodeURIComponent(album.id)}`), {
         method: 'DELETE',
       })
       if (!response.ok) {
@@ -100,7 +101,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
 
       const audio = new Audio()
       audio.preload = 'metadata'
-      audio.src = `/api/tracks/${track.id}/stream`
+      audio.src = apiUrl(`/api/tracks/${track.id}/stream`)
 
       const handleLoaded = () => {
         if (cancelled) return
@@ -136,7 +137,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
 
     try {
       const response = await fetch(
-        `/api/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(track.id)}`,
+        apiUrl(`/api/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(track.id)}`),
         { method: 'DELETE' },
       )
       if (!response.ok) {
