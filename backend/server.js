@@ -17,10 +17,19 @@ const app = express();
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const albumId = req.params.id || sanitizeName(req.body && req.body.name);
-    const targetDir = albumId ? path.join(libraryRoot, albumId) : libraryRoot;
+    if (!albumId) {
+      return cb(new Error('Album name is required'));
+    }
+
+    const targetDir = path.join(libraryRoot, albumId);
+
+    if (req.params.id && !fs.existsSync(targetDir)) {
+      return cb(new Error('Album not found'));
+    }
+
     ensureAlbumFolder(targetDir);
     req.albumUploadPath = targetDir;
-    cb(null, targetDir);
+    return cb(null, targetDir);
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -29,8 +38,7 @@ const storage = multer.diskStorage({
       file.fieldname === 'cover'
         ? 'cover'
         : sanitizeName(path.basename(file.originalname, ext)) || 'file';
-    const targetDir =
-      req.albumUploadPath ||
+    const targetDir = req.albumUploadPath ||
       path.join(libraryRoot, req.params.id || sanitizeName(req.body && req.body.name) || 'uploads');
     let candidate = `${baseName}${normalizedExt}`;
     if (fs.existsSync(path.join(targetDir, candidate))) {
@@ -105,10 +113,13 @@ function sanitizeName(value) {
     return '';
   }
 
-  return value
-    .normalize('NFKD')
-    .replace(/[^\w\-\s\.]/g, '')
-    .trim()
+  const normalized = value.normalize('NFKC').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
     .replace(/\s+/g, '_');
 }
 
@@ -377,6 +388,14 @@ app.post('/api/library/rescan', async (req, res) => {
   res.json({ albums: albums.map((album) => formatAlbum(album, false)) });
 });
 
+app.use((err, req, res, next) => {
+  if (err) {
+    console.error('Upload error:', err.message);
+    return handleUploadError(res, err);
+  }
+  return next();
+});
+
 app.get('/covers/:albumId/:fileName', async (req, res) => {
   await scanReady;
   const album = await getAlbumById(req.params.albumId);
@@ -390,10 +409,7 @@ app.get('/covers/:albumId/:fileName', async (req, res) => {
 const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
-
-  // Catch-all for any GET request, including root path,
-  // using a named wildcard per Express 5 syntax.
-  app.get('/{*splat}', (req, res) => {
+  app.get('*', (req, res) => {
     res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
 }
