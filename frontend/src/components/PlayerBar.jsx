@@ -25,19 +25,27 @@ const PlayerBar = ({ currentTrack }) => {
 
     const handleLoadedMetadata = () => {
       setDuration(audio.duration || 0)
+      setProgress(audio.currentTime || 0)
     }
 
     const handleEnded = () => {
       setIsPlaying(false)
     }
 
+    const handlePlay = () => setIsPlaying(true)
+    const handlePause = () => setIsPlaying(false)
+
     audio.addEventListener('timeupdate', handleTimeUpdate)
     audio.addEventListener('loadedmetadata', handleLoadedMetadata)
     audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('play', handlePlay)
+    audio.addEventListener('pause', handlePause)
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate)
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
       audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('play', handlePlay)
+      audio.removeEventListener('pause', handlePause)
     }
   }, [])
 
@@ -61,15 +69,14 @@ const PlayerBar = ({ currentTrack }) => {
     audio.pause()
     audio.currentTime = 0
     audio.src = currentTrack.streamUrl
+    audio.load()
     audio.volume = volume
 
     const play = async () => {
       try {
         await audio.play()
-        setIsPlaying(true)
       } catch (err) {
         console.warn('Unable to autoplay track', err)
-        setIsPlaying(false)
       }
     }
     play()
@@ -111,6 +118,18 @@ const PlayerBar = ({ currentTrack }) => {
     }
   }
 
+  const handleProgressBarClick = (event) => {
+    const audio = audioRef.current
+    if (!audio || !currentTrack || !duration) return
+
+    const track = event.currentTarget
+    const rect = track.getBoundingClientRect()
+    const fraction = (event.clientX - rect.left) / rect.width
+    const nextTime = Math.min(Math.max(0, fraction * duration), duration)
+    audio.currentTime = nextTime
+    setProgress(nextTime)
+  }
+
   const handleVolumeChange = (event) => {
     const nextVolume = Number(event.target.value)
     if (!Number.isNaN(nextVolume)) {
@@ -142,7 +161,7 @@ const PlayerBar = ({ currentTrack }) => {
                 {isPlaying ? '❚❚' : '►'}
               </button>
             </div>
-            <div className="player-progress">
+            <div className="player-progress" onClick={handleProgressBarClick} role="presentation">
               <span className="time-label">{formatTime(progress)}</span>
               <input
                 type="range"

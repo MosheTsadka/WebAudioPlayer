@@ -417,7 +417,6 @@ if (fs.existsSync(frontendDistPath)) {
   });
 }
 
-
 if (require.main === module) {
   (async () => {
     await scanReady;
