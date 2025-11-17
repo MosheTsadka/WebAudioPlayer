@@ -1,14 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+
+const formatTime = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const wholeSeconds = Math.floor(seconds)
+  const mins = Math.floor(wholeSeconds / 60)
+  const secs = wholeSeconds % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
 
 const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDeleted }) => {
   const [album, setAlbum] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [durationMap, setDurationMap] = useState({})
 
   useEffect(() => {
     if (!albumId) {
       setAlbum(null)
+      setDurationMap({})
       return
     }
 
@@ -29,6 +39,15 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
             (a, b) => (a.order ?? 0) - (b.order ?? 0),
           )
           setAlbum({ ...albumData, tracks })
+          setDurationMap(() => {
+            const next = {}
+            tracks.forEach((track) => {
+              if (Number.isFinite(track.duration)) {
+                next[track.id] = track.duration
+              }
+            })
+            return next
+          })
         }
       } catch (err) {
         if (isMounted) {
@@ -67,6 +86,47 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
       setActionError(err.message || 'Unable to delete album')
     }
   }
+
+  useEffect(() => {
+    if (!album?.tracks?.length) return undefined
+
+    let cancelled = false
+    const cleanupFns = []
+
+    album.tracks.forEach((track) => {
+      if (Number.isFinite(durationMap[track.id])) {
+        return
+      }
+
+      const audio = new Audio()
+      audio.preload = 'metadata'
+      audio.src = `/api/tracks/${track.id}/stream`
+
+      const handleLoaded = () => {
+        if (cancelled) return
+        if (Number.isFinite(audio.duration)) {
+          setDurationMap((prev) => ({ ...prev, [track.id]: audio.duration }))
+        }
+      }
+
+      audio.addEventListener('loadedmetadata', handleLoaded)
+      cleanupFns.push(() => {
+        audio.removeEventListener('loadedmetadata', handleLoaded)
+        audio.pause()
+        audio.src = ''
+      })
+    })
+
+    return () => {
+      cancelled = true
+      cleanupFns.forEach((fn) => fn())
+    }
+  }, [album?.tracks, durationMap])
+
+  const getDurationLabel = useMemo(
+    () => (trackId, fallback) => formatTime(durationMap[trackId] ?? fallback),
+    [durationMap],
+  )
 
   const handleDeleteTrack = async (track) => {
     if (!track) return
@@ -163,23 +223,42 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
       </div>
       <ol className="track-list">
         {album.tracks?.map((track) => (
-          <li key={track.id} className="track-item">
+          <li
+            key={track.id}
+            className="track-item playable"
+            role="button"
+            tabIndex={0}
+            onClick={() => onPlayTrack?.(track, album)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onPlayTrack?.(track, album)
+              }
+            }}
+          >
             <div>
               <p className="track-title">{track.title}</p>
               <p className="muted">Track {track.order}</p>
             </div>
             <div className="track-actions">
+              <span className="muted duration">{getDurationLabel(track.id, track.duration)}</span>
               <button
                 type="button"
                 className="primary"
-                onClick={() => onPlayTrack?.(track, album)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onPlayTrack?.(track, album)
+                }}
               >
                 Play
               </button>
               <button
                 type="button"
                 className="danger link-button"
-                onClick={() => handleDeleteTrack(track)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleDeleteTrack(track)
+                }}
               >
                 Delete
               </button>

@@ -58,6 +58,8 @@ const PlayerBar = ({ currentTrack }) => {
 
     setProgress(0)
     setDuration(0)
+    audio.pause()
+    audio.currentTime = 0
     audio.src = currentTrack.streamUrl
     audio.volume = volume
 
@@ -71,7 +73,7 @@ const PlayerBar = ({ currentTrack }) => {
       }
     }
     play()
-  }, [currentTrack, volume])
+  }, [currentTrack])
 
   useEffect(() => {
     const audio = audioRef.current
@@ -147,8 +149,9 @@ const PlayerBar = ({ currentTrack }) => {
                 min="0"
                 max={duration || 0}
                 step="0.1"
-                value={progress}
+                value={Math.min(progress, duration || 0)}
                 onChange={handleSeek}
+                onInput={handleSeek}
               />
               <span className="time-label">{formatTime(duration)}</span>
             </div>

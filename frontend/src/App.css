@@ -157,6 +157,16 @@
   background: #f1f5f9;
 }
 
+.track-item.playable {
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.track-item.playable:hover {
+  background: #e2e8f0;
+  transform: translateY(-1px);
+}
+
 .track-title {
   margin: 0;
   font-weight: 600;
@@ -227,11 +237,16 @@
 .player-controls .ghost {
   width: 42px;
   height: 42px;
+  aspect-ratio: 1;
   border-radius: 50%;
   border: 1px solid #cbd5e1;
   background: #ffffff;
   cursor: pointer;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .player-progress {
@@ -321,6 +336,11 @@
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+.track-actions .duration {
+  min-width: 3rem;
+  text-align: right;
 }
 
 .upload-page {
