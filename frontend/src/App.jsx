@@ -6,25 +6,7 @@ import UploadPage from './pages/UploadPage.jsx'
 import './App.css'
 import { apiUrl } from './apiClient'
 
-const parseHash = () => {
-  const hash = window.location.hash.replace(/^#/, '')
-  if (!hash || hash === '/') {
-    return { view: 'albums', albumId: null }
-  }
-
-  const segments = hash.split('/').filter(Boolean)
-  if (segments[0] === 'albums' && segments[1]) {
-    return { view: 'albumDetail', albumId: segments[1] }
-  }
-
-  if (segments[0] === 'upload') {
-    return { view: 'upload', albumId: null }
-  }
-
-  return { view: 'albums', albumId: null }
-}
-
-const parseHash = () => {
+const parseRouteFromHash = () => {
   const hash = window.location.hash.replace(/^#/, '')
   if (!hash || hash === '/') {
     return { view: 'albums', albumId: null }
@@ -43,13 +25,13 @@ const parseHash = () => {
 }
 
 function App() {
-  const [route, setRoute] = useState(() => parseHash())
+  const [route, setRoute] = useState(() => parseRouteFromHash())
   const [currentTrack, setCurrentTrack] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     const handleHashChange = () => {
-      setRoute(parseHash())
+      setRoute(parseRouteFromHash())
     }
     window.addEventListener('hashchange', handleHashChange)
     handleHashChange()

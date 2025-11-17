@@ -1,14 +1,25 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const resolveApiRoot = () => {
+  const envBase = import.meta.env.VITE_API_BASE_URL
+  if (envBase && typeof envBase === 'string') {
+    return envBase.replace(/\/$/, '')
+  }
 
-export const apiUrl = (path) => {
-  if (!path.startsWith('/')) {
-    path = `/${path}`
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/api`
   }
-  if (!API_BASE_URL) {
-    return path
-  }
-  const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
-  return `${base}${path}`
+
+  return '/api'
 }
 
-export const getApiBaseUrl = () => API_BASE_URL || '/api'
+const API_BASE_URL = resolveApiRoot()
+
+export const apiUrl = (path) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  const withoutApiPrefix = normalizedPath.startsWith('/api/')
+    ? normalizedPath.slice(4)
+    : normalizedPath
+  const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
+  return `${base}${withoutApiPrefix}`
+}
+
+export const getApiBaseUrl = () => API_BASE_URL
