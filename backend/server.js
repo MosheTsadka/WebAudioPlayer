@@ -2,7 +2,6 @@ const express = require('express');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
-const os = require('os');
 const multer = require('multer');
 const cors = require('cors');
 const { port, libraryRoot } = require('./config');
@@ -10,7 +9,7 @@ const { scanLibrary, getAlbums, getAlbumById, getTrackById } = require('./librar
 
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.flac']);
 const COVER_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
-const TEMP_UPLOAD_ROOT = path.join(os.tmpdir(), 'webaudio-uploads');
+const TEMP_UPLOAD_ROOT = path.join(libraryRoot, '_tmp_uploads');
 
 fs.mkdirSync(TEMP_UPLOAD_ROOT, { recursive: true });
 
@@ -20,9 +19,8 @@ const app = express();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const albumId = req.params.id || sanitizeName((req.body && req.body.name) || 'album');
-
     if (req.params.id) {
+      const albumId = req.params.id;
       const targetDir = path.join(libraryRoot, albumId);
       if (!fs.existsSync(targetDir)) {
         return cb(new Error('Album not found'));
@@ -36,7 +34,7 @@ const storage = multer.diskStorage({
       return cb(null, existingTempDir);
     }
 
-    const tempDir = fs.mkdtempSync(path.join(TEMP_UPLOAD_ROOT, `${albumId || 'album'}-`));
+    const tempDir = fs.mkdtempSync(path.join(TEMP_UPLOAD_ROOT, 'upload-'));
     req.albumUploadPath = tempDir;
     return cb(null, tempDir);
   },
