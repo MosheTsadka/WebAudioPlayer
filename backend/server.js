@@ -20,10 +20,7 @@ const app = express();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const albumId = req.params.id || sanitizeName(req.body && req.body.name);
-    if (!albumId) {
-      return cb(new Error('Album name is required'));
-    }
+    const albumId = req.params.id || sanitizeName((req.body && req.body.name) || 'album');
 
     if (req.params.id) {
       const targetDir = path.join(libraryRoot, albumId);
@@ -34,7 +31,12 @@ const storage = multer.diskStorage({
       return cb(null, targetDir);
     }
 
-    const tempDir = fs.mkdtempSync(path.join(TEMP_UPLOAD_ROOT, `${albumId}-`));
+    const existingTempDir = req.albumUploadPath;
+    if (existingTempDir && existingTempDir.startsWith(TEMP_UPLOAD_ROOT)) {
+      return cb(null, existingTempDir);
+    }
+
+    const tempDir = fs.mkdtempSync(path.join(TEMP_UPLOAD_ROOT, `${albumId || 'album'}-`));
     req.albumUploadPath = tempDir;
     return cb(null, tempDir);
   },
@@ -45,10 +47,7 @@ const storage = multer.diskStorage({
       file.fieldname === 'cover'
         ? 'cover'
         : sanitizeName(path.basename(file.originalname, ext)) || 'file';
-    const targetDir =
-      req.albumUploadPath ||
-      file.destination ||
-      path.join(libraryRoot, req.params.id || sanitizeName(req.body && req.body.name) || 'uploads');
+    const targetDir = req.albumUploadPath || file.destination || path.join(TEMP_UPLOAD_ROOT, 'uploads');
     let candidate = `${baseName}${normalizedExt}`;
     if (fs.existsSync(path.join(targetDir, candidate))) {
       const timestamp = Date.now();
@@ -148,6 +147,15 @@ function cleanupUploadedFiles(files) {
       }
     }
   });
+}
+
+async function cleanupTempDir(tempDir) {
+  if (!tempDir || !tempDir.startsWith(TEMP_UPLOAD_ROOT)) return;
+  try {
+    await fsp.rm(tempDir, { recursive: true, force: true });
+  } catch (err) {
+    console.warn('Failed to cleanup temp dir:', err);
+  }
 }
 
 async function moveTrackFiles(trackFiles, albumPath) {
@@ -322,6 +330,7 @@ app.post(
     const albumPath = path.join(libraryRoot, folderName);
     if (fs.existsSync(albumPath)) {
       cleanupUploadedFiles(req.files);
+      await cleanupTempDir(req.albumUploadPath);
       return res.status(409).json({ error: 'Album already exists' });
     }
 
@@ -330,6 +339,7 @@ app.post(
 
     if (trackFiles.length === 0) {
       cleanupUploadedFiles(req.files);
+      await cleanupTempDir(req.albumUploadPath);
       return res.status(400).json({ error: 'At least one track is required' });
     }
 
@@ -347,11 +357,13 @@ app.post(
       scanReady = scanLibrary();
       await scanReady;
       const album = await getAlbumById(folderName);
+      await cleanupTempDir(req.albumUploadPath);
       return res.status(201).json({ album: formatAlbum(album, true) });
     } catch (error) {
       console.error('Failed to create album:', error);
       cleanupUploadedFiles(req.files);
       await fsp.rm(albumPath, { recursive: true, force: true }).catch(() => {});
+      await cleanupTempDir(req.albumUploadPath);
       return handleUploadError(res, error);
     }
   },
@@ -437,10 +449,7 @@ app.get('/covers/:albumId/:fileName', async (req, res) => {
 const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
-
-  // Catch-all for any GET request, including root path,
-  // using a named wildcard per Express 5 syntax.
-  app.get('/{*splat}', (req, res) => {
+  app.get('*', (req, res) => {
     res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
 }
