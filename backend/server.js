@@ -470,7 +470,7 @@ const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
   // Express 5 compatible catch-all for client-side routing
-  app.get('/:path(*)', (req, res) => {
+  app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
 }
