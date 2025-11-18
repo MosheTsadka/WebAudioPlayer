@@ -53,7 +53,7 @@ const UploadPage = () => {
     })
 
     try {
-      const response = await fetch(apiUrl('/upload-album'), {
+      const response = await fetch(apiUrl('/albums'), {
         method: 'POST',
         body: formData,
       })
@@ -85,10 +85,13 @@ const UploadPage = () => {
     Array.from(appendTracks).forEach((track) => formData.append('tracks', track))
 
     try {
-      const response = await fetch(apiUrl(`/upload-track?albumId=${encodeURIComponent(targetAlbum)}`), {
-        method: 'POST',
-        body: formData,
-      })
+      const response = await fetch(
+        apiUrl(`/albums/${encodeURIComponent(targetAlbum)}/tracks`),
+        {
+          method: 'POST',
+          body: formData,
+        },
+      )
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}))
         throw new Error(errorBody.error || 'Failed to add tracks')

@@ -101,7 +101,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
 
       const audio = new Audio()
       audio.preload = 'metadata'
-      audio.src = apiUrl(`/stream/${track.id}`)
+      audio.src = apiUrl(`/tracks/${track.id}/stream`)
 
       const handleLoaded = () => {
         if (cancelled) return

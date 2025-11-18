@@ -82,7 +82,7 @@ function App() {
       title: track.title,
       albumTitle: album?.title,
       coverUrl: album?.coverUrl,
-      streamUrl: apiUrl(`/stream/${track.id}`),
+      streamUrl: apiUrl(`/tracks/${track.id}/stream`),
     })
   }, [])
 
