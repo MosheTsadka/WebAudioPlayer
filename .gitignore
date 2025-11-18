@@ -1,0 +1,12 @@
+# Ignore IDE settings and OS-specific files
+.idea/
+.vscode/
+
+# Node and Vite build artifacts
+node_modules/
+dist/
+.cache/
+
+# Logs and environment files
+*.log
+.env
