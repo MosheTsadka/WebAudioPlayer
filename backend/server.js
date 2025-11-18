@@ -469,8 +469,8 @@ app.get('/covers/:albumId/:fileName', async (req, res) => {
 const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 if (fs.existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath));
-  // Express 5 requires a path segment, so use a wildcard segment instead of '*'
-  app.get('/*', (req, res) => {
+  // Express 5 compatible catch-all for client-side routing
+  app.get('/:path(*)', (req, res) => {
     res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
 }
