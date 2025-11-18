@@ -13,7 +13,7 @@ const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
       setLoading(true)
       setError('')
       try {
-        const response = await fetch(apiUrl('/api/albums'))
+        const response = await fetch(apiUrl('/albums'))
         if (!response.ok) {
           throw new Error('Failed to load albums')
         }
@@ -43,7 +43,7 @@ const AlbumList = ({ onSelectAlbum, onAlbumDeleted, refreshKey = 0 }) => {
     if (!confirm) return
 
     try {
-      const response = await fetch(apiUrl(`/api/albums/${encodeURIComponent(albumId)}`), {
+      const response = await fetch(apiUrl(`/albums/${encodeURIComponent(albumId)}`), {
         method: 'DELETE',
       })
       if (!response.ok) {

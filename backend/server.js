@@ -19,8 +19,8 @@ const app = express();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    if (req.params.id) {
-      const albumId = req.params.id;
+    const albumId = req.params.id || req.query.albumId;
+    if (albumId) {
       const targetDir = path.join(libraryRoot, albumId);
       if (!fs.existsSync(targetDir)) {
         return cb(new Error('Album not found'));
@@ -222,22 +222,28 @@ function handleUploadError(res, error) {
   return res.status(500).json({ error: 'Upload failed' });
 }
 
-app.get('/api/albums', async (req, res) => {
+const listAlbumsHandler = async (req, res) => {
   await scanReady;
   const albums = (await getAlbums()).map((album) => formatAlbum(album, false));
   res.json({ albums });
-});
+};
 
-app.get('/api/albums/:id', async (req, res) => {
+const albumDetailHandler = async (req, res) => {
   await scanReady;
   const album = await getAlbumById(req.params.id);
   if (!album) {
     return res.status(404).json({ error: 'Album not found' });
   }
   return res.json({ album: formatAlbum(album, true) });
-});
+};
 
-app.get('/api/tracks/:trackId/stream', async (req, res) => {
+app.get('/api/albums', listAlbumsHandler);
+app.get('/albums', listAlbumsHandler);
+
+app.get('/api/albums/:id', albumDetailHandler);
+app.get('/albums/:id', albumDetailHandler);
+
+const streamTrackHandler = async (req, res) => {
   await scanReady;
   const track = await getTrackById(req.params.trackId);
   if (!track) {
@@ -286,7 +292,10 @@ app.get('/api/tracks/:trackId/stream', async (req, res) => {
 
     fs.createReadStream(track.filePath, { start, end }).pipe(res);
   });
-});
+};
+
+app.get('/api/tracks/:trackId/stream', streamTrackHandler);
+app.get('/stream/:trackId', streamTrackHandler);
 
 app.delete('/api/albums/:id', async (req, res) => {
   await scanReady;
@@ -306,70 +315,77 @@ app.delete('/api/albums/:id', async (req, res) => {
   }
 });
 
-app.post(
-  '/api/albums',
-  upload.fields([
-    { name: 'cover', maxCount: 1 },
-    { name: 'tracks', maxCount: 50 },
-  ]),
-  async (req, res) => {
-    const { name, description } = req.body;
-    if (!name || !name.trim()) {
-      cleanupUploadedFiles(req.files);
-      return res.status(400).json({ error: 'Album name is required' });
+const albumUploadMiddleware = upload.fields([
+  { name: 'cover', maxCount: 1 },
+  { name: 'tracks', maxCount: 50 },
+]);
+
+const createAlbumHandler = async (req, res) => {
+  const { name, description } = req.body;
+  if (!name || !name.trim()) {
+    cleanupUploadedFiles(req.files);
+    return res.status(400).json({ error: 'Album name is required' });
+  }
+
+  const folderName = sanitizeName(name);
+  if (!folderName) {
+    cleanupUploadedFiles(req.files);
+    return res.status(400).json({ error: 'Album name is invalid' });
+  }
+
+  const albumPath = path.join(libraryRoot, folderName);
+  if (fs.existsSync(albumPath)) {
+    cleanupUploadedFiles(req.files);
+    await cleanupTempDir(req.albumUploadPath);
+    return res.status(409).json({ error: 'Album already exists' });
+  }
+
+  const coverFile = req.files && req.files.cover ? req.files.cover[0] : null;
+  const trackFiles = (req.files && req.files.tracks) || [];
+
+  if (trackFiles.length === 0) {
+    cleanupUploadedFiles(req.files);
+    await cleanupTempDir(req.albumUploadPath);
+    return res.status(400).json({ error: 'At least one track is required' });
+  }
+
+  try {
+    await fsp.mkdir(albumPath, { recursive: true });
+
+    if (coverFile) {
+      normalizeCoverFile(albumPath, coverFile);
     }
 
-    const folderName = sanitizeName(name);
-    if (!folderName) {
-      cleanupUploadedFiles(req.files);
-      return res.status(400).json({ error: 'Album name is invalid' });
-    }
+    await moveTrackFiles(trackFiles, albumPath);
 
-    const albumPath = path.join(libraryRoot, folderName);
-    if (fs.existsSync(albumPath)) {
-      cleanupUploadedFiles(req.files);
-      await cleanupTempDir(req.albumUploadPath);
-      return res.status(409).json({ error: 'Album already exists' });
-    }
+    writeMetadata(albumPath, name.trim(), description ? description.trim() : undefined);
 
-    const coverFile = req.files && req.files.cover ? req.files.cover[0] : null;
-    const trackFiles = (req.files && req.files.tracks) || [];
+    scanReady = scanLibrary();
+    await scanReady;
+    const album = await getAlbumById(folderName);
+    await cleanupTempDir(req.albumUploadPath);
+    return res.status(201).json({ album: formatAlbum(album, true) });
+  } catch (error) {
+    console.error('Failed to create album:', error);
+    cleanupUploadedFiles(req.files);
+    await fsp.rm(albumPath, { recursive: true, force: true }).catch(() => {});
+    await cleanupTempDir(req.albumUploadPath);
+    return handleUploadError(res, error);
+  }
+};
 
-    if (trackFiles.length === 0) {
-      cleanupUploadedFiles(req.files);
-      await cleanupTempDir(req.albumUploadPath);
-      return res.status(400).json({ error: 'At least one track is required' });
-    }
+app.post('/api/albums', albumUploadMiddleware, createAlbumHandler);
+app.post('/upload-album', albumUploadMiddleware, createAlbumHandler);
 
-    try {
-      await fsp.mkdir(albumPath, { recursive: true });
-
-      if (coverFile) {
-        normalizeCoverFile(albumPath, coverFile);
-      }
-
-      await moveTrackFiles(trackFiles, albumPath);
-
-      writeMetadata(albumPath, name.trim(), description ? description.trim() : undefined);
-
-      scanReady = scanLibrary();
-      await scanReady;
-      const album = await getAlbumById(folderName);
-      await cleanupTempDir(req.albumUploadPath);
-      return res.status(201).json({ album: formatAlbum(album, true) });
-    } catch (error) {
-      console.error('Failed to create album:', error);
-      cleanupUploadedFiles(req.files);
-      await fsp.rm(albumPath, { recursive: true, force: true }).catch(() => {});
-      await cleanupTempDir(req.albumUploadPath);
-      return handleUploadError(res, error);
-    }
-  },
-);
-
-app.post('/api/albums/:id/tracks', upload.array('tracks', 50), async (req, res) => {
+const addTracksHandler = async (req, res) => {
   await scanReady;
-  const album = await getAlbumById(req.params.id);
+  const albumId = req.params.id || req.query.albumId || (req.body && req.body.albumId);
+  if (!albumId) {
+    cleanupUploadedFiles(req.files);
+    return res.status(400).json({ error: 'Album ID is required' });
+  }
+
+  const album = await getAlbumById(albumId);
   if (!album) {
     cleanupUploadedFiles(req.files);
     return res.status(404).json({ error: 'Album not found' });
@@ -384,14 +400,17 @@ app.post('/api/albums/:id/tracks', upload.array('tracks', 50), async (req, res) 
   try {
     scanReady = scanLibrary();
     await scanReady;
-    const updatedAlbum = await getAlbumById(req.params.id);
-  return res.json({ album: formatAlbum(updatedAlbum, true) });
+    const updatedAlbum = await getAlbumById(albumId);
+    return res.json({ album: formatAlbum(updatedAlbum, true) });
   } catch (error) {
     console.error('Failed to add tracks:', error);
     cleanupUploadedFiles(req.files);
     return handleUploadError(res, error);
   }
-});
+};
+
+app.post('/api/albums/:id/tracks', upload.array('tracks', 50), addTracksHandler);
+app.post('/upload-track', upload.array('tracks', 50), addTracksHandler);
 
 app.delete('/api/albums/:albumId/tracks/:trackId', async (req, res) => {
   await scanReady;
@@ -420,11 +439,14 @@ app.delete('/api/albums/:albumId/tracks/:trackId', async (req, res) => {
   }
 });
 
-app.post('/api/library/rescan', async (req, res) => {
+const rescanHandler = async (req, res) => {
   scanReady = scanLibrary();
   const albums = await scanReady;
   res.json({ albums: albums.map((album) => formatAlbum(album, false)) });
-});
+};
+
+app.post('/api/library/rescan', rescanHandler);
+app.post('/rescan', rescanHandler);
 
 app.use((err, req, res, next) => {
   if (err) {

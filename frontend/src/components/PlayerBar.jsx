@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 const formatTime = (seconds) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
@@ -8,12 +8,33 @@ const formatTime = (seconds) => {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-const PlayerBar = ({ currentTrack }) => {
+const PlayerBar = ({ currentTrack, resumeState }) => {
   const audioRef = useRef(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(1)
+  const [volume, setVolume] = useState(() => {
+    if (resumeState && typeof resumeState.volume === 'number') {
+      return Math.min(1, Math.max(0, resumeState.volume))
+    }
+    return 1
+  })
+  const [pendingResume, setPendingResume] = useState(resumeState)
+
+  const persistPlaybackState = useCallback(
+    (state) => {
+      try {
+        if (!state || !state.track) {
+          window.localStorage.removeItem('webaudio:last-playback')
+          return
+        }
+        window.localStorage.setItem('webaudio:last-playback', JSON.stringify(state))
+      } catch (err) {
+        console.warn('Failed to persist playback state', err)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     const audio = audioRef.current
@@ -50,6 +71,15 @@ const PlayerBar = ({ currentTrack }) => {
   }, [])
 
   useEffect(() => {
+    if (resumeState) {
+      setPendingResume(resumeState)
+      if (typeof resumeState.volume === 'number') {
+        setVolume(Math.min(1, Math.max(0, resumeState.volume)))
+      }
+    }
+  }, [resumeState])
+
+  useEffect(() => {
     const audio = audioRef.current
     if (!audio) {
       return
@@ -72,21 +102,107 @@ const PlayerBar = ({ currentTrack }) => {
     audio.load()
     audio.volume = volume
 
+    const resumeInfo =
+      pendingResume && pendingResume.trackId && pendingResume.trackId === currentTrack.id
+        ? pendingResume
+        : null
+
     const play = async () => {
       try {
-        await audio.play()
+        if (resumeInfo && Number.isFinite(resumeInfo.position)) {
+          audio.currentTime = Math.max(0, resumeInfo.position)
+        }
+        if (!resumeInfo || resumeInfo.isPlaying) {
+          await audio.play()
+          setIsPlaying(true)
+        } else {
+          setIsPlaying(false)
+        }
       } catch (err) {
         console.warn('Unable to autoplay track', err)
       }
     }
+
     play()
-  }, [currentTrack])
+    setPendingResume(null)
+  }, [currentTrack, pendingResume, volume])
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
     audio.volume = volume
   }, [volume])
+
+  useEffect(() => {
+    if (!currentTrack) {
+      persistPlaybackState(null)
+      return
+    }
+
+    persistPlaybackState({
+      track: currentTrack,
+      position: progress,
+      duration,
+      volume,
+      isPlaying,
+    })
+  }, [currentTrack, duration, isPlaying, persistPlaybackState, progress, volume])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || !currentTrack) {
+      return undefined
+    }
+
+    const audio = audioRef.current
+    if (!audio) return undefined
+
+    try {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.albumTitle || 'WebAudioPlayer',
+        album: currentTrack.albumTitle || undefined,
+        artwork: currentTrack.coverUrl
+          ? [
+              {
+                src: currentTrack.coverUrl,
+                sizes: '512x512',
+                type: 'image/png',
+              },
+            ]
+          : [],
+      })
+
+      navigator.mediaSession.setActionHandler('play', async () => {
+        try {
+          await audio.play()
+        } catch (err) {
+          console.warn('Media session play failed', err)
+        }
+      })
+      navigator.mediaSession.setActionHandler('pause', () => {
+        audio.pause()
+      })
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime != null && Number.isFinite(details.seekTime)) {
+          const next = Math.min(duration || audio.duration || 0, Math.max(0, details.seekTime))
+          audio.currentTime = next
+          setProgress(next)
+        }
+      })
+    } catch (err) {
+      console.warn('Unable to configure media session', err)
+    }
+
+    return () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', null)
+        navigator.mediaSession.setActionHandler('pause', null)
+        navigator.mediaSession.setActionHandler('seekto', null)
+      } catch (err) {
+        console.warn('Unable to clear media session handlers', err)
+      }
+    }
+  }, [currentTrack, duration])
 
   const togglePlayback = async () => {
     const audio = audioRef.current

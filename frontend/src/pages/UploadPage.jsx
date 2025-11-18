@@ -15,7 +15,7 @@ const UploadPage = () => {
   const refreshAlbums = async () => {
     setLoadingAlbums(true)
     try {
-      const response = await fetch(apiUrl('/api/albums'))
+      const response = await fetch(apiUrl('/albums'))
       if (!response.ok) {
         throw new Error('Failed to load albums')
       }
@@ -53,7 +53,7 @@ const UploadPage = () => {
     })
 
     try {
-      const response = await fetch(apiUrl('/api/albums'), {
+      const response = await fetch(apiUrl('/upload-album'), {
         method: 'POST',
         body: formData,
       })
@@ -85,7 +85,7 @@ const UploadPage = () => {
     Array.from(appendTracks).forEach((track) => formData.append('tracks', track))
 
     try {
-      const response = await fetch(apiUrl(`/api/albums/${targetAlbum}/tracks`), {
+      const response = await fetch(apiUrl(`/upload-track?albumId=${encodeURIComponent(targetAlbum)}`), {
         method: 'POST',
         body: formData,
       })

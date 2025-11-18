@@ -29,7 +29,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
       setError('')
       setActionError('')
       try {
-        const response = await fetch(apiUrl(`/api/albums/${albumId}`))
+        const response = await fetch(apiUrl(`/albums/${albumId}`))
         if (!response.ok) {
           throw new Error('Unable to load album details')
         }
@@ -73,7 +73,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
     if (!confirm) return
 
     try {
-      const response = await fetch(apiUrl(`/api/albums/${encodeURIComponent(album.id)}`), {
+      const response = await fetch(apiUrl(`/albums/${encodeURIComponent(album.id)}`), {
         method: 'DELETE',
       })
       if (!response.ok) {
@@ -101,7 +101,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
 
       const audio = new Audio()
       audio.preload = 'metadata'
-      audio.src = apiUrl(`/api/tracks/${track.id}/stream`)
+      audio.src = apiUrl(`/stream/${track.id}`)
 
       const handleLoaded = () => {
         if (cancelled) return
@@ -137,7 +137,7 @@ const AlbumDetail = ({ albumId, onBack, onPlayTrack, onAlbumDeleted, onTrackDele
 
     try {
       const response = await fetch(
-        apiUrl(`/api/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(track.id)}`),
+        apiUrl(`/albums/${encodeURIComponent(albumId)}/tracks/${encodeURIComponent(track.id)}`),
         { method: 'DELETE' },
       )
       if (!response.ok) {

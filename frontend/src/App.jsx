@@ -27,6 +27,7 @@ const parseRouteFromHash = () => {
 function App() {
   const [route, setRoute] = useState(() => parseRouteFromHash())
   const [currentTrack, setCurrentTrack] = useState(null)
+  const [resumeState, setResumeState] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
@@ -36,6 +37,25 @@ function App() {
     window.addEventListener('hashchange', handleHashChange)
     handleHashChange()
     return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('webaudio:last-playback')
+      if (!raw) return
+      const saved = JSON.parse(raw)
+      if (saved && saved.track && saved.track.id) {
+        setCurrentTrack(saved.track)
+        setResumeState({
+          trackId: saved.track.id,
+          position: Number.isFinite(saved.position) ? saved.position : 0,
+          isPlaying: Boolean(saved.isPlaying),
+          volume: Number.isFinite(saved.volume) ? Math.min(1, Math.max(0, saved.volume)) : undefined,
+        })
+      }
+    } catch (err) {
+      console.warn('Unable to restore playback state', err)
+    }
   }, [])
 
   const navigate = useCallback((hash) => {
@@ -55,13 +75,14 @@ function App() {
     if (!track) {
       return
     }
+    setResumeState(null)
     setCurrentTrack({
       id: track.id,
       albumId: track.albumId,
       title: track.title,
       albumTitle: album?.title,
       coverUrl: album?.coverUrl,
-      streamUrl: apiUrl(`/api/tracks/${track.id}/stream`),
+      streamUrl: apiUrl(`/stream/${track.id}`),
     })
   }, [])
 
@@ -76,7 +97,13 @@ function App() {
   const handleAlbumDeleted = useCallback(
     (albumId) => {
       setRefreshKey((value) => value + 1)
-      setCurrentTrack((track) => (track && track.albumId === albumId ? null : track))
+      setCurrentTrack((track) => {
+        if (track && track.albumId === albumId) {
+          setResumeState(null)
+          return null
+        }
+        return track
+      })
       if (route.albumId === albumId) {
         navigate('/')
       }
@@ -86,7 +113,13 @@ function App() {
 
   const handleTrackDeleted = useCallback((albumId, trackId) => {
     setRefreshKey((value) => value + 1)
-    setCurrentTrack((track) => (track && track.id === trackId ? null : track))
+    setCurrentTrack((track) => {
+      if (track && track.id === trackId) {
+        setResumeState(null)
+        return null
+      }
+      return track
+    })
     if (route.albumId === albumId && window.location.hash !== `#/albums/${albumId}`) {
       navigate(`/albums/${albumId}`)
     }
@@ -131,7 +164,7 @@ function App() {
         {route.view === 'upload' ? <UploadPage /> : null}
       </main>
 
-      <PlayerBar currentTrack={currentTrack} />
+      <PlayerBar currentTrack={currentTrack} resumeState={resumeState} />
     </div>
   )
 }
